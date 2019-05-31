@@ -687,7 +687,7 @@
 		publicAPIs.validate = function (field, options) {
 
 			// Don't validate submits, buttons, file and reset inputs, and disabled and readonly fields
-			if (field.disabled || field.readOnly || field.type === 'reset' || field.type === 'submit' || field.type === 'button') return;
+			if (field.disabled || field.readOnly || field.type === 'reset' || field.type === 'submit' || field.type === 'button') return Promise.resolve();
 
 			// Local settings
 			var _settings = extend(settings, options || {});
@@ -714,13 +714,15 @@
 		 * @return {Promise<Array>} An array of fields with errors
 		 */
 		publicAPIs.validateAll = function (target) {
-			var getValidations = Array.prototype.filter.call(target.querySelectorAll('input, select, textarea'), function (field) {
+			var getValidations = Array.prototype.map.call(target.querySelectorAll('input, select, textarea'), function (field) {
 				return publicAPIs.validate(field).then(function (validate) {
-					return validate && !validate.valid;
+					return validate && !validate.valid ? field : null;
 				});
 			});
 
-			return Promise.all(getValidations);
+			return Promise.all(getValidations).then(function (validations) {
+				return validations.filter(Boolean);
+			});
 		};
 
 		/**
@@ -764,24 +766,25 @@
 			event.preventDefault();
 
 			// Validate each field
-			var errors = publicAPIs.validateAll(event.target);
+			publicAPIs.validateAll(event.target).then(function (errors) {
 
-			// If there are errors, focus on the first one
-			if (errors.length > 0) {
-				errors[0].focus();
-				emitEvent(event.target, 'bouncerFormInvalid', {errors: errors});
-				return;
-			}
+				// If there are errors, focus on the first one
+				if (errors.length > 0) {
+					errors[0].focus();
+					emitEvent(event.target, 'bouncerFormInvalid', {errors: errors});
+					return;
+				}
 
-			// Otherwise, submit if not disabled
-			if (!settings.disableSubmit) {
-				event.target.submit();
-			}
+				// Otherwise, submit if not disabled
+				if (!settings.disableSubmit) {
+					event.target.submit();
+				}
 
-			// Emit custom event
-			if (settings.emitEvents) {
-				emitEvent(event.target, 'bouncerFormValid');
-			}
+				// Emit custom event
+				if (settings.emitEvents) {
+					emitEvent(event.target, 'bouncerFormValid');
+				}
+			});
 
 		};
 
