@@ -264,15 +264,22 @@
 	 * @param  {Object} errors      The existing errors
 	 * @param  {Object} validations The custom validations to run
 	 * @param  {Object} settings    The plugin settings
-	 * @return {Object}             The tests and their results
+	 * @return {Promise<Object>}    The tests and their results
 	 */
 	var customValidations = function (field, errors, validations, settings) {
+		var getCustomErrors = [];
 		for (var test in validations) {
 			if (validations.hasOwnProperty(test)) {
-				errors[test] = validations[test](field, settings);
+				var getCustomError = validations[test](field, settings).then(function (error) {
+					errors[test] = error;
+				});
+
+				getCustomErrors.push(getCustomError);
 			}
 		}
-		return errors;
+		return Promise.all(getCustomErrors).then(function () {
+			return errors;
+		});
 	};
 
 	/**
@@ -291,7 +298,7 @@
 	 * Check a field for errors
 	 * @param  {Node} field      The field to test
 	 * @param  {Object} settings The plugin settings
-	 * @return {Object}          The field validity and errors
+	 * @return {Promise<Object>} The field validity and errors
 	 */
 	var getErrors = function (field, settings) {
 
@@ -299,13 +306,12 @@
 		var errors = runValidations(field,settings);
 
 		// Check for custom validations
-		errors = customValidations(field, errors, settings.customValidations, settings);
-
-		return {
-			valid: !hasErrors(errors),
-			errors: errors
-		};
-
+		return customValidations(field, errors, settings.customValidations, settings).then(function (errors) {
+			return {
+				valid: !hasErrors(errors),
+				errors: errors
+			};
+		});
 	};
 
 	/**
@@ -681,43 +687,48 @@
 
 		/**
 		 * Validate a field
-		 * @param  {Node} field     The field to validate
-		 * @param  {Object} options Validation options
-		 * @return {Object}         The validity state and errors
+		 * @param  {Node} field      The field to validate
+		 * @param  {Object} options  Validation options
+		 * @return {Promise<Object>} The validity state and errors
 		 */
 		publicAPIs.validate = function (field, options) {
 
 			// Don't validate submits, buttons, file and reset inputs, and disabled and readonly fields
-			if (field.disabled || field.readOnly || field.type === 'reset' || field.type === 'submit' || field.type === 'button') return;
+			if (field.disabled || field.readOnly || field.type === 'reset' || field.type === 'submit' || field.type === 'button') return Promise.resolve();
 
 			// Local settings
 			var _settings = extend(settings, options || {});
 
 			// Check for errors
-			var isValid = getErrors(field, _settings);
+			return getErrors(field, _settings).then(function(isValid) {
 
-			// If valid, remove any error messages
-			if (isValid.valid) {
-				removeError(field, _settings);
-				return;
-			}
+				// If valid, remove any error messages
+				if (isValid.valid) {
+					removeError(field, _settings);
+					return;
+				}
 
-			// Otherwise, show an error message
-			showError(field, isValid.errors, _settings);
+				// Otherwise, show an error message
+				showError(field, isValid.errors, _settings);
 
-			return isValid;
-
+				return isValid;
+			});
 		};
 
 		/**
 		 * Validate all fields in a form or section
-		 * @param  {Node} target The form or section to validate fields in
-		 * @return {Array}       An array of fields with errors
+		 * @param  {Node} target    The form or section to validate fields in
+		 * @return {Promise<Array>} An array of fields with errors
 		 */
 		publicAPIs.validateAll = function (target) {
-			return Array.prototype.filter.call(target.querySelectorAll('input, select, textarea'), function (field) {
-				var validate = publicAPIs.validate(field);
-				return validate && !validate.valid;
+			var getValidations = Array.prototype.map.call(target.querySelectorAll('input, select, textarea'), function (field) {
+				return publicAPIs.validate(field).then(function (validate) {
+					return validate && !validate.valid ? field : null;
+				});
+			});
+
+			return Promise.all(getValidations).then(function (validations) {
+				return validations.filter(Boolean);
 			});
 		};
 
@@ -762,24 +773,25 @@
 			event.preventDefault();
 
 			// Validate each field
-			var errors = publicAPIs.validateAll(event.target);
+			publicAPIs.validateAll(event.target).then(function (errors) {
 
-			// If there are errors, focus on the first one
-			if (errors.length > 0) {
-				errors[0].focus();
-				emitEvent(event.target, 'bouncerFormInvalid', {errors: errors});
-				return;
-			}
+				// If there are errors, focus on the first one
+				if (errors.length > 0) {
+					errors[0].focus();
+					emitEvent(event.target, 'bouncerFormInvalid', {errors: errors});
+					return;
+				}
 
-			// Otherwise, submit if not disabled
-			if (!settings.disableSubmit) {
-				event.target.submit();
-			}
+				// Otherwise, submit if not disabled
+				if (!settings.disableSubmit) {
+					event.target.submit();
+				}
 
-			// Emit custom event
-			if (settings.emitEvents) {
-				emitEvent(event.target, 'bouncerFormValid');
-			}
+				// Emit custom event
+				if (settings.emitEvents) {
+					emitEvent(event.target, 'bouncerFormValid');
+				}
+			});
 
 		};
 
