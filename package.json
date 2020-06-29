@@ -12,6 +12,9 @@
 		"type": "git",
 		"url": "http://github.com/thomasreiser/bouncer"
 	},
+    "publishConfig": {
+		"registry": "https://npm.pkg.github.com/"
+    },
 	"devDependencies": {
 		"gulp": "4.0.0",
 		"del": "3.0.0",
